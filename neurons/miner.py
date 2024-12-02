@@ -49,7 +49,7 @@ class Miner(BaseMinerNeuron):
         super(Miner, self).__init__(config=config)
         
         # Load default symbols, model path and currency from config file
-        self.crypto_symbols, self.model_path, self.currency = self.load_config()
+        self.crypto_symbols, self.model_path, self.currency, self.intervals = self.load_config()
         
         # Load model
         if self.model_path:
@@ -62,17 +62,18 @@ class Miner(BaseMinerNeuron):
     def load_config(self):
         # default values
         config = configparser.ConfigParser()
-        config.read('config.properties')
+        config.read('miner.properties')
         
         # Load symbols, model path, and currency from DEFAULT section
         if config.has_section('DEFAULT'):
-            symbols = config.get('DEFAULT', 'symbols', fallback='tao').split(',')
+            symbols = config.get('DEFAULT', 'symbols', fallback='tao').split(',') # Default to 'tao'
             model_path = config.get('DEFAULT', 'model_path', fallback=None)
-            currency = config.get('DEFAULT', 'currency', fallback='usd')  # Default to 'usd' if not specified
+            currency = config.get('DEFAULT', 'currency', fallback='usd')  # Default to 'usd'
+            intervals = config.get('DEFAULT', 'intervals', fallback='5m').split(',')  # Default to '5m'
             
-            return [symbol.strip() for symbol in symbols], model_path, currency  # Strip whitespace from symbols
+            return [symbol.strip() for symbol in symbols], model_path, currency, intervals  # Strip whitespace from symbols
         
-        return [], None, 'usd'  # Return empty list, None for model path, and default currency
+        return [], None, 'usd', '5m'  # Return empty list, None for model path, default currency and intervals
 
     def load_model(self, model_path):
         """Load a model from various formats based on its file extension."""
@@ -167,12 +168,21 @@ class Miner(BaseMinerNeuron):
 
     async def forward(self, synapse: crypto_ai.protocol.Dummy) -> crypto_ai.protocol.Dummy:
         requested_symbols = synapse.request_data.get('symbols', self.crypto_symbols)
+        requested_intervals = synapse.request_data.get('intervals', self.intervals)
         requested_currency = synapse.request_data.get('currency', self.currency)  # Use request currency or default
 
-        is_valid = any((len(symbol) <= 5 or len(symbol) >= 2) for symbol in requested_symbols)
-
-        if not is_valid:
+        # check if provided symbols are supported by the miner
+        is_valid_symbol = all(symbol in self.crypto_symbols for symbol in requested_symbols)
+        if not is_valid_symbol:
             msg = "No supported crypto symbols provided"
+            synapse.dummy_output = msg
+            bt.logging.warning(msg)
+            return synapse
+
+        # check if provided intervals are supported by the miner
+        is_valid_interval = all(interval in self.intervals for interval in requested_intervals)
+        if not is_valid_interval:
+            msg = "No supported intervals provided"
             synapse.dummy_output = msg
             bt.logging.warning(msg)
             return synapse
